@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html>
+
+	<head>
+		<title>Shadows, eventually!</title>
+		<meta http-equiv="content-type" content="text/html; charset=ISO-8859-1">
+		
+		<style type="text/css">
+			#main {
+				overflow:hidden;
+			}
+			
+			#canvascontainer {
+				float:left;
+			}
+			
+			#controlcontainer {
+				overflow:hidden;
+				padding:20px;
+			}
+			
+			#shaders {
+				float:left;
+				
+			}
+			
+			.shaderbox {
+				float:left;
+				padding:10px;
+			}
+			
+			.shaderinput {
+				width: 450px;
+				height: 400px;
+			}
+			
+			.reload {
+				width:100px;
+				height:35px;
+				float:none;
+				margin: 20px;
+			}
+			
+			.thumbnailcontainer {
+				padding: 20px;
+				margin: 20px;
+			}
+			
+			.thumbnail {
+				width: 50px;
+				height: 50px;
+			}
+			
+		</style>
+		
+		
+		
+		<!-- 
+			These are un-indented to make them look good in the text area boxes
+		-->
+		
+		<script type="x-shader/x-vertex" id="my_vertex_shader">
+attribute vec3 aPosition;
+attribute vec2 aTexCoord;
+			
+varying vec2 vTexCoord;
+			
+void main() {
+	gl_Position = vec4(aPosition, 1.0);
+	vTexCoord = aTexCoord;
+}
+		</script>
+		
+		<script type="x-shader/x-fragment" id="my_fragment_shader">
+#ifdef GL_ES
+precision highp float;
+#endif
+
+varying vec2 vTexCoord;
+
+uniform sampler2D Texture;
+
+void main() {
+	
+    vec3 col = texture2D(Texture,vTexCoord).xyz;//*100.0/length;
+
+    gl_FragColor = vec4(col,1.0);
+}
+		</script>
+		
+		<script src="webgl-debug.js"></script>
+		<script type="text/javascript">
+			
+			/* Misc vars */
+			var gl;
+			var g_Width, g_Height;
+			
+			var cxt;
+			var totalTime = 0;
+			var then = 0;
+			
+			var times = [];
+			var timesIndex = 0;
+			var FRAMES_TO_AVERAGE = 10;
+			
+			/* Manage FPS metrics */
+			var fps = 0;
+			function updateFps(dt) {
+				
+				times[timesIndex] = dt;
+				timesIndex++;
+				
+				if(timesIndex >= FRAMES_TO_AVERAGE) {
+					timesIndex = 0;
+					
+					var avg = 0;
+					for(var i = 0; i < FRAMES_TO_AVERAGE; i++) {
+						avg += times[i];
+					}
+					
+					fps = 1.0 / (avg / FRAMES_TO_AVERAGE);
+				}
+			}
+			
+			/* Start */
+			function start() {
+			
+				for(var i = 0; i < FRAMES_TO_AVERAGE; i++) {
+					times[i] = 0;
+				}
+			
+				then = (new Date()).getTime() * 0.001;
+			
+				var canvas = document.getElementById("mycanvas");
+				//cxt = canvas.getContext("2d");
+				
+				initGL(canvas);
+				//initBuffers();
+				//initShaders();
+				//initTextures();
+				
+				
+				step(0);
+			}
+			
+			/* Initialize GL */
+			function initGL(canvas) {
+			
+				try {
+					gl = WebGLDebugUtils.makeDebugContext( canvas.getContext("experimental-webgl") );
+					
+					g_Width = canvas.width;
+					g_Height = canvas.height;
+					
+				} catch(e) {
+				}
+				
+				if(!gl) {
+					document.write("Could not initalize WebGL! :'(");
+				}
+			}
+			
+			
+			/* Vertex buffer */
+			var vertexBuffer;
+			var texCoordBuffer;
+			function initBuffers() {
+			
+				var z = 0.0;
+				var vertices = [
+					 1.0,  1.0, z,
+					-1.0,  1.0, z,
+					-1.0, -1.0, z,
+					
+					-1.0, -1.0, z,
+					 1.0, -1.0, z,
+					 1.0,  1.0, z,
+				];
+				
+				var coords = [
+					1.0, 1.0,
+					0.0, 1.0,
+					0.0, 0.0,
+					
+					0.0, 0.0,
+					1.0, 0.0,
+					1.0, 1.0
+				];
+				
+				vertexBuffer = gl.createBuffer();
+				gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+				gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+				
+				texCoordBuffer = gl.createBuffer();
+				gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBuffer);
+				gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(coords), gl.STATIC_DRAW);
+				
+				
+			}
+			
+			/* Textures! */
+			var texture1;
+			var texture2;
+			function initTextures() {
+				setupTexture(document.getElementById("img1").src);
+			}
+			
+			function setupTexture(src) {
+				
+				if(texture1 != null) {
+					gl.deleteTexture(texture1);
+					texture1 = null;
+				}
+			
+				texture1 = gl.createTexture();
+				var image = new Image();
+				image.src = src;
+				image.onload = function() { onImageLoaded(texture1, image); };
+			}
+			
+			function onImageLoaded(tex, img) {
+				gl.bindTexture(gl.TEXTURE_2D, tex);
+				
+				gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, img);
+				//gl.texImage2D(gl.TEXTURE_2D, 0, img);
+				gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+				gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+				gl.generateMipmap(gl.TEXTURE_2D);
+				
+				gl.bindTexture(gl.TEXTURE_2D, null);
+			}
+			
+			function changeTexture(index) {
+				var id = "img"+index;
+				setupTexture(document.getElementById(id).src);
+			}
+			
+			/* Shaders! */
+			var program;
+			function initShaders() {
+				
+				// Start by just copying over the shaders from the script tags to the text areas
+				
+				var text_vs = document.getElementById("my_vertex_shader").firstChild.textContent;
+				var text_fs = document.getElementById("my_fragment_shader").firstChild.textContent;
+				
+				var tAreaVs = document.getElementById("text_vs");
+				var tAreaFs = document.getElementById("text_fs");
+				tAreaVs.value = text_vs;
+				tAreaFs.value = text_fs;
+				
+				// Then load them
+				loadShaders(text_vs, text_fs);
+			}
+			
+			function reloadShaders() {
+				loadShaders(
+					document.getElementById("text_vs").value,
+					document.getElementById("text_fs").value
+				);
+			}
+			
+			/* Load a shader from a "x-shader/x-vertex" type script tag*/
+			function loadShaderFromScriptTag(tag) {
+				
+				var elem = document.getElementById(tag);
+				if(!elem) {
+					alert("error loading shader, could not find '" + tag + "'");
+					return null;
+				}
+				
+				var text = elem.firstChild.textContent;
+				
+				var shader = null;
+				
+				if(elem.type == "x-shader/x-vertex") {
+					shader = loadSingleShader(text, "vertex_shader");
+				}  else if(elem.type == "x-shader/x-fragment") {
+					shader = loadSingleShader(text, "fragment_shader");
+				} else {
+					alert("Error: Illegal shader script tag type '" + elem.type + "'");
+					shader = null;
+				}
+				
+				return shader;
+				
+			}
+			
+			/* Load a shader (vs or fs) from a text source */
+			function loadSingleShader(text, type) {
+				
+				var shader = null;
+				if(type == "vertex_shader") {
+					shader = gl.createShader(gl.VERTEX_SHADER);
+				} else if(type == "fragment_shader") {
+					shader = gl.createShader(gl.FRAGMENT_SHADER);
+				} else {
+					alert("Error: Illegal shader type '" + type + "'");
+				}
+				
+				gl.shaderSource(shader, text);
+				gl.compileShader(shader);
+				
+				if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+					alert("Shader compile error: <" + type + ">: " + gl.getShaderInfoLog(shader));
+					return null;
+				}
+				
+				return shader;
+			}
+			
+			/* Load shaders and create a program from two string inputs */
+			function loadShaders(text_vs, text_fs) {
+				
+				if(program != null) {
+					gl.deleteProgram(program);
+					program = null;
+				}
+			
+				var vs = loadSingleShader(text_vs, "vertex_shader");
+				var fs = loadSingleShader(text_fs, "fragment_shader");
+				
+				program = gl.createProgram();
+				gl.attachShader(program, vs);
+				gl.attachShader(program, fs);
+				gl.linkProgram(program);
+				
+				 if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+					alert("Error linking program!");
+				}
+			}
+			
+			
+			/* called continuously */
+			function step() {
+			
+				var now = (new Date()).getTime() * 0.001;
+				var elapsed = now - then;
+				then = now;
+			
+				totalTime += elapsed
+				
+				updateFps(elapsed);
+				
+				document.getElementById("timeval").innerHTML = Math.floor(totalTime);
+				document.getElementById("fps").innerHTML = Math.floor(fps);
+				document.getElementById("ms").innerHTML = Math.floor( (1.0 / fps) * 1000 );
+				
+				draw();
+				window.setTimeout(step, 1);
+			}
+			
+			var TYPE_FLOAT = 0;
+			var TYPE_INT = 1
+			function setupUniforms() {
+				setUniform("Texture", 0, TYPE_INT);
+				setUniform("Time", totalTime, TYPE_FLOAT);
+				setUniform("Width", g_Width, TYPE_INT);
+				setUniform("Height", g_Height, TYPE_INT);
+			}
+			
+			function setUniform(name, value, type) {
+				var loc = gl.getUniformLocation(program, name);
+				if(loc != null) {
+					switch(type) {
+					case TYPE_INT:
+						gl.uniform1i(loc, value);
+						break;
+					case TYPE_FLOAT:
+						gl.uniform1f(loc, value);
+						break;
+					default:
+						alert("Uniform setup failed, type '" + type + "' unrecognized!");
+					}
+				}
+			}
+			
+			
+			/* Draw stuff! */
+			function draw() {
+				
+				gl.clearColor(0.4, 0.5, 0.6, 1.0);
+				gl.clear(gl.DEPTH_BUFFER_BIT | gl.COLOR_BUFFER_BIT);
+				
+				gl.viewport(0, 0, g_Width, g_Height);
+				
+				/*
+				var viewMat = [ 1.0, 0.0, 0.0, 0.0,
+								0.0, 1.0, 0.0, 0.0,
+								0.0, 0.0, 1.0, 0.0, 
+								0.0, 0.0, 0.0, 1.0];
+				*/			
+				
+				
+				
+				/*
+				cxt.clearRect(0,0,800,600);
+				
+				cxt.fillStyle="#FF0000";
+				cxt.beginPath();
+				cxt.arc(400+Math.cos(totalTime)*160,300+Math.sin(totalTime)*160,15,0,Math.PI*2,true);
+				cxt.closePath();
+				cxt.fill();
+				*/
+			}
+			
+			function onButtonReload() {
+				reloadShaders();
+			}
+			
+			function imgClicked(no) {
+				changeTexture(no);
+			}
+			
+		</script>
+		
+	</head>
+	
+	<body onload="start();" style="background-color:#EEEEEE">
+		<div id="main">
+
+			<div id="canvascontainer">
+				<canvas id="mycanvas" width="800" height="600">
+					<!-- Let's get it on!-->
+				</canvas>
+			</div>
+			
+			<div id="controlcontainer">
+				<div id="shaders" > 
+					<div class="shaderbox"> <div>Vertex Shader</div> <textarea id="text_vs" class="shaderinput"></textarea> </div>
+					<div class="shaderbox"> <div>Fragment Shader</div> <textarea id="text_fs" class="shaderinput"></textarea> </div>
+				</div>
+				
+				<div> <form id="myform"><input type="button" id="reloadbutton" class="reload"  value="Reload" onClick="onButtonReload()"></input> </div></form>
+			</div>
+			
+		</div>
+		
+		<div>
+			Time elapsed: <span id="timeval">.</span> s <br />
+			FPS: <span id="fps">.</span> <br />
+			ms: <span id="ms">.</span> <br />
+		</div>
+	</body>
+
+</html>
